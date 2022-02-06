@@ -17,6 +17,7 @@ object Node2Topic {
     topic.getNotes.getContent(INotes.PLAIN).asInstanceOf[IPlainNotesContent]
   val emptyTextTopic: ITopic => Boolean = (tpc: ITopic) =>
     tpc == null || tpc.getTitleText.isEmpty
+  val emptyTopic: ITopic = topic("")
   val emptyContentTopic: ITopic => Boolean = (tpc: ITopic) =>
     tpc == null || notesContent(tpc).getTextContent.isEmpty
 
@@ -38,6 +39,65 @@ object Node2Topic {
     val content = topics.map(notesContent).map(_.getTextContent).mkString("\n")
     notesContent(topics.head).setTextContent(content)
     topics.head
+  }
+
+  def tpcCreateTable(node: ASTNode): ITopic = {
+    require(node.getType == HiveParser.TOK_CREATETABLE)
+    val res = for (elem <- node.getChildren.asScala; child = elem.asInstanceOf[ASTNode]) yield {
+      child.getType match {
+        case HiveParser.TOK_TABNAME => tpcTabName(child)
+        case HiveParser.KW_TEMPORARY => emptyTopic
+        case HiveParser.TOK_LIKETABLE => emptyTopic
+        case HiveParser.TOK_TABCOLLIST => emptyTopic
+        case HiveParser.TOK_TABLECOMMENT =>
+          val cmt = child.getChildren.get(0).toString
+          val comment = cmt.slice(1, cmt.length - 1) //去除引号
+          topic("_label", Array(comment), "")
+        case HiveParser.TOK_TABLEPARTCOLS => emptyTopic
+        case HiveParser.TOK_ALTERTABLE_BUCKETS => emptyTopic
+        case HiveParser.TOK_TABLEROWFORMAT => emptyTopic
+        case HiveParser.TOK_TABLESERIALIZER => emptyTopic
+        case HiveParser.TOK_FILEFORMAT_GENERIC => emptyTopic
+        case HiveParser.TOK_FILEFORMAT_GENERIC => emptyTopic
+        case HiveParser.TOK_TABLESKEWED => emptyTopic
+        case HiveParser.TOK_QUERY => tpcQuery(child)
+        case _ => throw new RuntimeException(unknownType(child))
+      }
+    }
+    val rtnTopic = res.head
+    val labelTpc = res.filter(_.getTitleText.equals("_label"))
+    if (labelTpc.nonEmpty) rtnTopic.setLabels(labelTpc.head.getLabels)
+    val subTopic = res.filterNot(emptyTextTopic).filterNot(_.getTitleText.equals("_label")) - rtnTopic
+    if (subTopic.nonEmpty) {
+      val head = subTopic.head
+      val add = if (head.getTitleText.equals("_select")) head.getAllChildren.asScala else List(head)
+      add.foreach(rtnTopic.add)
+    }
+    rtnTopic
+  }
+
+  def tpcDropTable(node: ASTNode): ITopic = {
+    require(node.getType == HiveParser.TOK_DROPTABLE)
+    val res = for (elem <- node.getChildren.asScala; child = elem.asInstanceOf[ASTNode]) yield {
+      child.getType match {
+        case HiveParser.TOK_TABNAME => tpcTabName(child)
+        case HiveParser.TOK_IFEXISTS => emptyTopic
+        case HiveParser.KW_PURGE => emptyTopic //
+        case _ => throw new RuntimeException(unknownType(child))
+      }
+    }
+    res.filterNot(emptyTextTopic).head
+  }
+
+  def tpcTruncateTable(node: ASTNode): ITopic = {
+    require(node.getType == HiveParser.TOK_TRUNCATETABLE)
+    val res = for (elem <- node.getChildren.asScala; child = elem.asInstanceOf[ASTNode]) yield {
+      child.getType match {
+        case HiveParser.TOK_TABLE_PARTITION => topic(getTablePartition(child))
+        case _ => throw new RuntimeException(unknownType(child))
+      }
+    }
+    res.filterNot(emptyTextTopic).head
   }
 
   def tpcTabName(node: ASTNode): ITopic = topic(getTabName(node))
@@ -157,21 +217,27 @@ object Node2Topic {
     require(node.getType == HiveParser.TOK_QUERY)
     val res = for (elem <- childrenASTNode(node)) yield {
       elem.getType match {
-        case HiveParser.TOK_FROM => ("from", tpcFrom(elem))
-        case HiveParser.TOK_INSERT => ("insert", tpcInsert(elem))
+        case HiveParser.TOK_FROM => ("_from", tpcFrom(elem))
+        case HiveParser.TOK_INSERT => ("_insert", tpcInsert(elem))
         case _ => throw new RuntimeException(unknownType(elem))
       }
     }
-    val from = res.filter(_._1.equals("from")).map(_._2).head
-    val insert = res.filter(_._1.equals("insert")).map(_._2).head
+    val filterTopicHead = (identifier: String) => res
+      .filter { case (id, _) => id.equals(identifier) }
+      .map { case (_, tpc) => tpc }
+      .head
+    val from = filterTopicHead("_from")
+    val insert = filterTopicHead("_insert")
     //要返回的topic
-    val returnTopic = if (insert.getAllChildren.size() == 0) topic(insert.getTitleText) else insert
+    val rtnTpc = if (insert.getAllChildren.size() == 0) topic(insert.getTitleText) else insert
+    val fromU1 = from.getTitleText.equals("_u1")
     //把子topic添加到要返回的topic上
-    if (emptyTextTopic(from) || from.getTitleText.equals("_u1")) from.getAllChildren.asScala.foreach(returnTopic.add) else returnTopic.add(from)
-    val insertTopic = if (from.getTitleText.equals("_u1")) topic("") else insert
+    if (emptyTextTopic(from) || fromU1) from.getAllChildren.asScala.foreach(rtnTpc.add)
+    else rtnTpc.add(from)
+    val insertTopic = if (fromU1) topic("") else insert
     //把insert上的信息合并到返回的topic的第一个子topic上
-    topicMergeContent(returnTopic.getAllChildren.get(0), insertTopic)
-    returnTopic
+    topicMergeContent(rtnTpc.getAllChildren.get(0), insertTopic)
+    rtnTpc
   }
 
   def save(topic: ITopic, rootText: String, file: String): Unit = {

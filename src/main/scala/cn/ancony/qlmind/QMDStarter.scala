@@ -7,7 +7,6 @@ import org.apache.hadoop.hive.ql.parse.ParseUtils
 import org.xmind.core.ITopic
 
 import java.io.{File, FileFilter}
-import scala.collection.JavaConverters._
 import scala.io.Source
 
 object QMDStarter {
@@ -26,7 +25,7 @@ object QMDStarter {
     //      case "-f" =>
     //      case "-d" =>
     //    }
-    //    file("D:\\mixed\\qlmind\\src\\main\\resources\\test_hql.sql")
+    //    file("D:\\mixed\\qlmind\\src\\main\\resources\\test_table.sql")
     dir("D:\\mixed\\qlmind\\src\\main\\resources",false)
   }
 
@@ -49,7 +48,7 @@ object QMDStarter {
     .filter(getExtendName(_).equals("sql"))
 
   def combineAndSave(topics: Array[ITopic], supTopicTitleText: String): Unit = {
-    Combine.combineTopics(topics)
+    Combine.linkTopics(topics)
     val tpc = topic(supTopicTitleText)
     topics.foreach(tpc.add)
     Node2Topic.save(tpc, "qmd", "hqlFile.xmind")

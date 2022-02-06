@@ -14,6 +14,18 @@ object Node2String {
   val unknownType: ASTNode => String = (node: ASTNode) =>
     s"Unknown type: ${node.getType}, name: ${node.toString} in node ${node.getParent.asInstanceOf[ASTNode].dump()}"
 
+  def getTablePartition(node: ASTNode): String = {
+    require(node.getType == HiveParser.TOK_TABLE_PARTITION)
+    val res = for (elem <- node.getChildren.asScala; child = elem.asInstanceOf[ASTNode]) yield {
+      child.getType match {
+        case HiveParser.TOK_TABNAME => getTabName(child)
+        case HiveParser.TOK_PARTSPEC => "" //
+        case _ => throw new RuntimeException(unknownType(child))
+      }
+    }
+    res.filter(_.nonEmpty).head
+  }
+
   def getTabName(node: ASTNode): String = {
     require(node.getType == HiveParser.TOK_TABNAME)
     val res = for (elem <- node.getChildren.asScala)
@@ -23,13 +35,15 @@ object Node2String {
 
   def getTabRef(node: ASTNode): String = {
     require(node.getType == HiveParser.TOK_TABREF)
-    val res = for (elem <- node.getChildren.asScala; child = elem.asInstanceOf[ASTNode]) yield {
+    var res = for (elem <- node.getChildren.asScala; child = elem.asInstanceOf[ASTNode]) yield {
       child.getType match {
         case HiveParser.TOK_TABNAME => getTabName(child)
+        case HiveParser.TOK_TABLEBUCKETSAMPLE => ""
         case HiveParser.Identifier => child.toString
         case _ => throw new RuntimeException(unknownType(child))
       }
     }
+    res = res.filter(_.nonEmpty)
     val ref = if (res.length == 2) s"(${res(1)})" else empty
     res.head + ref
   }
@@ -186,14 +200,14 @@ object Node2String {
   val even: Int => Boolean = (n: Int) => !odd(n)
 
   def getCaseWhenString(caseWhen: mutable.Buffer[String], typ: String): String = {
-    val condition = typ match {
+    val (cond, head) = typ match {
       case "CASE" => (odd, Array(caseWhen.head))
       case "WHEN" => (even, Array("CASE", caseWhen.head))
       case _ => throw new RuntimeException("")
     }
     val len = caseWhen.tail.length
-    val fill = Array.tabulate(len - 2)(i => if (condition._1(i)) "THEN" else "WHEN") ++ Array("ELSE", "END")
-    val res = condition._2 ++ caseWhen.tail.zip(fill).flatMap(i => Array(i._1, i._2))
+    val fill = Array.tabulate(len - 2)(i => if (cond(i)) "THEN" else "WHEN") ++ Array("ELSE", "END")
+    val res = head ++ caseWhen.tail.zip(fill).flatMap { case (value, keyword) => Array(value, keyword) }
     res.mkString(" ")
   }
 
@@ -371,10 +385,11 @@ object Node2String {
     val res = for (elem <- node.getChildren.asScala; child = elem.asInstanceOf[ASTNode]) yield {
       child.getType match {
         case HiveParser.TOK_TABNAME => getTabName(child)
+        case HiveParser.TOK_PARTSPEC => ""
         case _ => throw new RuntimeException(unknownType(child))
       }
     }
-    res.head
+    res.filter(_.nonEmpty).head
   }
 
   def getDestination(node: ASTNode): String = {
@@ -498,6 +513,7 @@ object Node2String {
         case HiveParser.TOK_FUNCTIONDI => getFunctionDi(child)
         case HiveParser.TOK_ALLCOLREF => getAllColRef(child)
         case HiveParser.TOK_FUNCTIONSTAR => getFunctionStar(child)
+        case HiveParser.StringLiteral => child.toString
         case _ => throw new RuntimeException(unknownType(child))
       }
     res.mkString(space)

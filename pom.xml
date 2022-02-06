@@ -21,9 +21,9 @@
             <version>0.8</version>
         </dependency>
         <dependency>
-            <groupId>junit</groupId>
-            <artifactId>junit</artifactId>
-            <version>4.13.2</version>
+            <groupId>org.scalatest</groupId>
+            <artifactId>scalatest_2.11</artifactId>
+            <version>3.2.10</version>
             <scope>test</scope>
         </dependency>
         <dependency>
@@ -65,7 +65,7 @@
                     </execution>
                 </executions>
                 <configuration>
-                    <scalaVersion>2.11.8</scalaVersion>
+                    <scalaVersion>2.11.12</scalaVersion>
                 </configuration>
             </plugin>
             <plugin>

@@ -1,19 +1,37 @@
 package cn.ancony.qlmind.util
 
+import cn.ancony.qlmind.parse.Node2Topic
 import org.xmind.core.ITopic
 
 import scala.collection.JavaConverters._
 
 object Combine {
+  val leaves: ITopic => Array[ITopic] =
+    (tpc: ITopic) => getSubTopicRecursion(tpc, _ => true)
 
-  def combineTopics(topics: Array[ITopic]): Unit = {
+  def linkTopics(topics: Array[ITopic]): Unit = {
     val rmRef = (text: String) => text.slice(0, text.indexOf('('))
-    val leaves = (tpc: ITopic) => getSubTopicRecursion(tpc, _ => true)
     val text = (tpc: ITopic) => tpc.getTitleText
     val fromTopics = topics.map(leaves).flatten
     for (elem <- topics) fromTopics
       .filter(f => rmRef(text(f)).equals(text(elem)) || text(f).equals(text(elem)))
       .foreach(addLink(_, elem))
+  }
+
+  def linkAndRemoveTopics(topics: Array[ITopic], removeTopicTexts: Array[String]): Unit = {
+    linkTopics(topics)
+    val reserve = topics.filter(tpc => !removeTopicTexts.exists(_.equals(tpc.getTitleText)))
+    val root = Node2Topic.wb.getPrimarySheet.getRootTopic
+    reserve.foreach(root.add)
+    val allLeaves = (for (r <- reserve) yield leaves(r)).flatten
+    for (rm <- removeTopicTexts) {
+      val maybeTopic = allLeaves.find(_.getTitleText.equals(rm))
+      if (maybeTopic.isDefined) {
+        val parent = maybeTopic.get.getParent
+        parent.remove(maybeTopic.get)
+        parent.add(topics.find(_.getTitleText.equals(rm)).get)
+      }
+    }
   }
 
   /**
