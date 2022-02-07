@@ -110,6 +110,7 @@ object Node2String {
         case HiveParser.StringLiteral => child.toString
         case HiveParser.KW_AND => getAnd(child)
         case HiveParser.KW_OR => getOr(child)
+        case HiveParser.TOK_FUNCTION => getFunction(child)
         case _ if relationship.contains(child.getType) => getRelationshipCompare(child)
         case _ => throw new RuntimeException(unknownType(child))
       }
@@ -191,6 +192,8 @@ object Node2String {
     val res = for (elem <- node.getChildren.asScala; child = elem.asInstanceOf[ASTNode]) yield
       child.getType match {
         case HiveParser.TOK_TABLE_OR_COL => getTableOrCol(child)
+        case HiveParser.TOK_FUNCTION => getFunction(child)
+        case HiveParser.Number => child.toString
         case _ => throw new RuntimeException(unknownType(child))
       }
     res.mkString("=")
@@ -209,6 +212,18 @@ object Node2String {
     val fill = Array.tabulate(len - 2)(i => if (cond(i)) "THEN" else "WHEN") ++ Array("ELSE", "END")
     val res = head ++ caseWhen.tail.zip(fill).flatMap { case (value, keyword) => Array(value, keyword) }
     res.mkString(" ")
+  }
+
+  def getGreaterThanOrEqualTo(node: ASTNode): String = {
+    require(node.getType == HiveParser.GREATERTHANOREQUALTO)
+    val res = for (elem <- node.getChildren.asScala; child = elem.asInstanceOf[ASTNode]) yield
+      child.getType match {
+        case HiveParser.TOK_TABLE_OR_COL => getTableOrCol(child)
+        case HiveParser.TOK_FUNCTION => getFunction(child)
+        case HiveParser.Number => child.toString
+        case _ => throw new RuntimeException(unknownType(child))
+      }
+    res.mkString(">=")
   }
 
   def getFunction(node: ASTNode): String = {
@@ -230,6 +245,11 @@ object Node2String {
         case HiveParser.KW_CASE => child.toString
         case HiveParser.EQUAL => getEqual(child)
         case HiveParser.TOK_NULL => "NULL"
+        case HiveParser.TOK_FUNCTION => getFunction(child)
+        case HiveParser.KW_AND => getAnd(child)
+        case HiveParser.KW_OR => getOr(child)
+        case HiveParser.GREATERTHANOREQUALTO => getGreaterThanOrEqualTo(child)
+        case HiveParser.MINUS => getArithmetics(child)
         case _ => throw new RuntimeException(unknownType(child))
       }
     }
@@ -428,7 +448,7 @@ object Node2String {
         case _ => throw new RuntimeException(unknownType(child))
       }
     }
-    "GROUP BY " + res.mkString(", ")
+    "GROUP BY " + res.mkString(", \n")
   }
 
   def getAnd(node: ASTNode): String = {
@@ -488,7 +508,9 @@ object Node2String {
         case HiveParser.Number => child.toString
         case _ => throw new RuntimeException(unknownType(child))
       }
-    s"${res.head} ${node.toString.toUpperCase} ${res(1)}"
+    val opt = node.toString.toUpperCase
+    val head = res.head
+    if (res.nonEmpty) s"$opt$head" else s"$head $opt ${res(1)}"
   }
 
   def getFunctionStar(node: ASTNode): String = {
