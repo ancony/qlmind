@@ -113,7 +113,7 @@ object Node2Topic {
     val res = for (elem <- childrenASTNode(node)) yield
       elem.getType match {
         case HiveParser.TOK_TABREF => tpcTabRef(elem)
-        case _ if relationship.contains(elem.getType)=> tpcRelationshipCompare(elem)
+        case _ if relationship.contains(elem.getType) => tpcRelationshipCompare(elem)
         case HiveParser.KW_AND => tpcAnd(elem)
         case _ if joinTypeMap.keys.exists(_ == elem.getType) => tpcJoin(elem)
         case HiveParser.TOK_SUBQUERY => tpcSubQuery(elem)
@@ -172,6 +172,19 @@ object Node2Topic {
     queryTopic
   }
 
+  def tpcLateralView(node: ASTNode): ITopic = {
+    require(node.getType == HiveParser.TOK_LATERAL_VIEW)
+    val res = for (elem <- childrenASTNode(node)) yield {
+      elem.getType match {
+        case HiveParser.TOK_TABREF => getTabRef(elem)
+        case HiveParser.TOK_SELECT => getSelect(elem)
+        case _ => throw new RuntimeException(unknownType(elem))
+      }
+    }
+    val str = "LATERAL VIEW " + res.head
+    topic(res(1), Array(), str)
+  }
+
   def tpcFrom(node: ASTNode): ITopic = {
     require(node.getType == HiveParser.TOK_FROM)
     val res = for (elem <- childrenASTNode(node)) yield {
@@ -179,6 +192,7 @@ object Node2Topic {
         case _ if joinTypeMap.keys.exists(_ == elem.getType) => tpcJoin(elem)
         case HiveParser.TOK_TABREF => tpcTabRef(elem)
         case HiveParser.TOK_SUBQUERY => tpcSubQuery(elem)
+        case HiveParser.TOK_LATERAL_VIEW => tpcLateralView(elem)
         case _ => throw new RuntimeException(unknownType(elem))
       }
     }

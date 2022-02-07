@@ -26,7 +26,7 @@ object QMDStarter {
     //      case "-d" =>
     //    }
     //    file("D:\\mixed\\qlmind\\src\\main\\resources\\test_table.sql")
-    dir("D:\\mixed\\qlmind\\src\\main\\resources",false)
+    dir("D:\\mixed\\qlmind\\src\\main\\resources", false)
   }
 
   def dir(dirName: String, merge: Boolean): Unit = {
@@ -60,7 +60,7 @@ object QMDStarter {
 
   def readFromFile(fileName: String): String = {
     val fn = Source.fromFile(fileName)
-    val lines = fn.getLines().map(_.trim).filterNot(_.startsWith("--")).mkString("\n")
+    val lines = fn.getLines().map(_.trim).filterNot(_.startsWith("--")).filterNot(_.startsWith("#")).mkString("\n")
     fn.close()
     lines
   }

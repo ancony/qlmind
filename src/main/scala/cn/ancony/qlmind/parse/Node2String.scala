@@ -115,7 +115,8 @@ object Node2String {
         case _ => throw new RuntimeException(unknownType(child))
       }
     }
-    res.mkString(s" OR ")
+    val rtn = res.mkString(s" OR ")
+    "(" + rtn + ")"
   }
 
   def getWhere(node: ASTNode): String = {
@@ -182,7 +183,9 @@ object Node2String {
     "ISNOTFALSE" -> "IS NOT FALSE")
   val rmAddCast: Map[String, String] = Map(
     "TOK_INT" -> "INT",
-    "TOK_DOUBLE" -> "DOUBLE"
+    "TOK_DOUBLE" -> "DOUBLE",
+    "TOK_BIGINT" -> "BIGINT",
+    "TOK_STRING" -> "STRING"
   )
   val cast: (String, String) => String = (typ: String, field: String) => s"CAST($field AS ${rmAddCast(typ)})"
   val isStr: (String, String) => String = (typ: String, field: String) => s"$field ${rmAddIs(typ)}"
@@ -321,6 +324,7 @@ object Node2String {
       child.getType match {
         case HiveParser.TOK_TABLE_OR_COL => getTableOrCol(child)
         case HiveParser.DOT => getDot(child)
+        case HiveParser.TOK_FUNCTION => getFunction(child)
         case _ => throw new RuntimeException(unknownType(child))
       }
     typ + " BY " + res.mkString(", ")
@@ -341,6 +345,7 @@ object Node2String {
 
   def getWindowSpec(node: ASTNode): String = {
     require(node.getType == HiveParser.TOK_WINDOWSPEC)
+    if (node.getChildren == null) return "()"
     var identifier = false
     val res = for (elem <- node.getChildren.asScala; child = elem.asInstanceOf[ASTNode]) yield {
       child.getType match {
@@ -444,6 +449,7 @@ object Node2String {
       child.getType match {
         case HiveParser.StringLiteral => child.toString
         case HiveParser.KW_AND => getAnd(child)
+        case HiveParser.KW_OR => getOr(child)
         case _ if relationship.contains(child.getType) => getRelationshipCompare(child)
         case _ => throw new RuntimeException(unknownType(child))
       }
@@ -493,11 +499,13 @@ object Node2String {
       child.getType match {
         case HiveParser.TOK_TABLE_OR_COL => getTableOrCol(child)
         case HiveParser.Number => child.toString
+        case HiveParser.TOK_FUNCTION => getFunction(child)
+        case HiveParser.DOT => getDot(child)
         case _ => throw new RuntimeException(unknownType(child))
       }
     val opt = node.toString.toUpperCase
     val head = res.head
-    if (res.nonEmpty) s"$opt$head" else s"$head $opt ${res(1)}"
+    if (res.length == 1) s"$opt$head" else s"$head $opt ${res(1)}"
   }
 
   def getFunctionStar(node: ASTNode): String = {
@@ -508,6 +516,16 @@ object Node2String {
         case _ => throw new RuntimeException(unknownType(child))
       }
     res.mkString(s" + ")
+  }
+
+  def getTabAlias(node: ASTNode): String = {
+    require(node.getType == HiveParser.TOK_TABALIAS)
+    val res = for (elem <- node.getChildren.asScala; child = elem.asInstanceOf[ASTNode]) yield
+      child.getType match {
+        case HiveParser.Identifier => child.toString
+        case _ => throw new RuntimeException(unknownType(child))
+      }
+    res.head
   }
 
   def getSelExpr(node: ASTNode): String = {
@@ -522,10 +540,24 @@ object Node2String {
         case HiveParser.TOK_FUNCTIONDI => getFunctionDi(child)
         case HiveParser.TOK_ALLCOLREF => getAllColRef(child)
         case HiveParser.TOK_FUNCTIONSTAR => getFunctionStar(child)
+        case HiveParser.Number => child.toString
+        case HiveParser.KW_NOT => getNot(child)
+        case HiveParser.TOK_NULL => "NULL"
+        case HiveParser.TOK_TABALIAS => "_alias_" + getTabAlias(child)
         case HiveParser.StringLiteral => child.toString
         case _ => throw new RuntimeException(unknownType(child))
       }
-    res.mkString(space)
+
+    val toRtn = res.filter(_.nonEmpty)
+    val alias = toRtn.filter(_.startsWith("_alias_"))
+    val rtn = if (alias.nonEmpty) handleAlias(res.toArray, alias.head.slice("_alias_".length, alias.head.length))
+    else res.toArray
+    rtn.mkString(space)
+  }
+
+  def handleAlias(arr: Array[String], alias: String): Array[String] = {
+    if (arr.length != 3) throw new RuntimeException("to do support.")
+    Array(arr.head, alias, "AS", arr(1))
   }
 
   def getNode(node: ASTNode): Array[String] = {

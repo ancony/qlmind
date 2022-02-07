@@ -7,7 +7,8 @@ package object parse {
     HiveParser.TOK_JOIN -> "JOIN",
     HiveParser.TOK_LEFTOUTERJOIN -> "LEFT JOIN",
     HiveParser.TOK_LEFTSEMIJOIN -> "LEFT SEMI JOIN",
-    HiveParser.TOK_RIGHTOUTERJOIN -> "RIGHT JOIN")
+    HiveParser.TOK_RIGHTOUTERJOIN -> "RIGHT JOIN",
+    HiveParser.TOK_FULLOUTERJOIN -> "FULL OUTER JOIN")
 
   val unionType: Array[Int] = Array(
     HiveParser.TOK_UNIONALL,
