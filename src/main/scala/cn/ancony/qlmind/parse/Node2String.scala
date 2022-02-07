@@ -187,18 +187,6 @@ object Node2String {
   val cast: (String, String) => String = (typ: String, field: String) => s"CAST($field AS ${rmAddCast(typ)})"
   val isStr: (String, String) => String = (typ: String, field: String) => s"$field ${rmAddIs(typ)}"
 
-  def getEqual(node: ASTNode): String = {
-    require(node.getType == HiveParser.EQUAL)
-    val res = for (elem <- node.getChildren.asScala; child = elem.asInstanceOf[ASTNode]) yield
-      child.getType match {
-        case HiveParser.TOK_TABLE_OR_COL => getTableOrCol(child)
-        case HiveParser.TOK_FUNCTION => getFunction(child)
-        case HiveParser.Number => child.toString
-        case _ => throw new RuntimeException(unknownType(child))
-      }
-    res.mkString("=")
-  }
-
   val odd: Int => Boolean = (n: Int) => n % 2 == 1
   val even: Int => Boolean = (n: Int) => !odd(n)
 
@@ -243,12 +231,11 @@ object Node2String {
         case _ if rmAddCast.contains(child.toString) => child.toString
         case HiveParser.KW_WHEN => child.toString
         case HiveParser.KW_CASE => child.toString
-        case HiveParser.EQUAL => getEqual(child)
+        case _ if relationship.contains(child.getType) => getRelationshipCompare(child)
         case HiveParser.TOK_NULL => "NULL"
         case HiveParser.TOK_FUNCTION => getFunction(child)
         case HiveParser.KW_AND => getAnd(child)
         case HiveParser.KW_OR => getOr(child)
-        case HiveParser.GREATERTHANOREQUALTO => getGreaterThanOrEqualTo(child)
         case HiveParser.MINUS => getArithmetics(child)
         case _ => throw new RuntimeException(unknownType(child))
       }

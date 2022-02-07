@@ -104,7 +104,7 @@ object Node2Topic {
 
   def tpcTabRef(node: ASTNode): ITopic = topic(getTabRef(node))
 
-  def tpcEqual(node: ASTNode): ITopic = topicOnlyContent(getRelationshipCompare(node))
+  def tpcRelationshipCompare(node: ASTNode): ITopic = topicOnlyContent(getRelationshipCompare(node))
 
   def tpcAnd(node: ASTNode): ITopic = topicOnlyContent(getAnd(node))
 
@@ -113,9 +113,7 @@ object Node2Topic {
     val res = for (elem <- childrenASTNode(node)) yield
       elem.getType match {
         case HiveParser.TOK_TABREF => tpcTabRef(elem)
-        //关系比较操作返回内容
-        case HiveParser.NOTEQUAL |
-             HiveParser.EQUAL => tpcEqual(elem)
+        case _ if relationship.contains(elem.getType)=> tpcRelationshipCompare(elem)
         case HiveParser.KW_AND => tpcAnd(elem)
         case _ if joinTypeMap.keys.exists(_ == elem.getType) => tpcJoin(elem)
         case HiveParser.TOK_SUBQUERY => tpcSubQuery(elem)
