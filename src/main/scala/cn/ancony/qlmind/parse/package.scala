@@ -3,6 +3,7 @@ package cn.ancony.qlmind
 import org.apache.hadoop.hive.ql.parse.HiveParser
 
 package object parse {
+
   val joinTypeMap = Map(
     HiveParser.TOK_JOIN -> "JOIN",
     HiveParser.TOK_LEFTOUTERJOIN -> "LEFT JOIN",
@@ -42,4 +43,5 @@ package object parse {
     HiveParser.DIVIDE,
     HiveParser.DIV,
     HiveParser.MOD)
+
 }

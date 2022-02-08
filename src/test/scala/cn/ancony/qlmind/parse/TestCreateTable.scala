@@ -1,5 +1,6 @@
 package cn.ancony.qlmind.parse
 
+import cn.ancony.qlmind.util.FileUtils.save
 import org.apache.hadoop.hive.ql.parse.ParseUtils
 import org.scalatest.funsuite.AnyFunSuite
 
@@ -77,6 +78,6 @@ class TestCreateTable extends AnyFunSuite {
     val node = ParseUtils.parse(hql2)
     println(node.dump())
     val topic = Node2Topic.tpcCreateTable(node)
-    Node2Topic.save(topic, "ct", "ct.xmind")
+    save(topic, "ct", "ct.xmind")
   }
 }

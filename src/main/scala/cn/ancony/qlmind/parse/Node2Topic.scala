@@ -1,45 +1,13 @@
 package cn.ancony.qlmind.parse
 
 import cn.ancony.qlmind.parse.Node2String._
+import cn.ancony.qlmind.util.TopicUtils.{childrenASTNode, emptyContentTopic, emptyTextTopic, emptyTopic, notesContent, topic, topicMergeContent, topicOnlyContent}
 import org.apache.hadoop.hive.ql.parse.{ASTNode, HiveParser}
 import org.xmind.core._
 
 import scala.collection.JavaConverters._
-import scala.collection.mutable
 
 object Node2Topic {
-
-  val wb: IWorkbook = Core.getWorkbookBuilder.createWorkbook()
-
-  val childrenASTNode: ASTNode => mutable.Buffer[ASTNode] =
-    (node: ASTNode) => node.getChildren.asScala.map(_.asInstanceOf[ASTNode])
-  val notesContent: ITopic => IPlainNotesContent = (topic: ITopic) =>
-    topic.getNotes.getContent(INotes.PLAIN).asInstanceOf[IPlainNotesContent]
-  val emptyTextTopic: ITopic => Boolean = (tpc: ITopic) =>
-    tpc == null || tpc.getTitleText.isEmpty
-  val emptyTopic: ITopic = topic("")
-  val emptyContentTopic: ITopic => Boolean = (tpc: ITopic) =>
-    tpc == null || notesContent(tpc).getTextContent.isEmpty
-
-  def topic(text: String, labels: Array[String] = Array(), content: String = ""): ITopic = {
-    val tpc = wb.createTopic()
-    tpc.setTitleText(text)
-    if (labels.nonEmpty) tpc.setLabels(labels.toList.asJava)
-    val pc = wb.createNotesContent(INotes.PLAIN).asInstanceOf[IPlainNotesContent]
-    pc.setTextContent(content)
-    tpc.getNotes.setContent(INotes.PLAIN, pc)
-    tpc
-  }
-
-  val topicOnlyContent: String => ITopic =
-    (content: String) => topic("", Array(), content)
-
-  //合并topic的内容，忽略其他
-  def topicMergeContent(topics: ITopic*): ITopic = {
-    val content = topics.map(notesContent).map(_.getTextContent).mkString("\n")
-    notesContent(topics.head).setTextContent(content)
-    topics.head
-  }
 
   def tpcCreateTable(node: ASTNode): ITopic = {
     require(node.getType == HiveParser.TOK_CREATETABLE)
@@ -57,7 +25,6 @@ object Node2Topic {
         case HiveParser.TOK_ALTERTABLE_BUCKETS => emptyTopic
         case HiveParser.TOK_TABLEROWFORMAT => emptyTopic
         case HiveParser.TOK_TABLESERIALIZER => emptyTopic
-        case HiveParser.TOK_FILEFORMAT_GENERIC => emptyTopic
         case HiveParser.TOK_FILEFORMAT_GENERIC => emptyTopic
         case HiveParser.TOK_TABLESKEWED => emptyTopic
         case HiveParser.KW_EXTERNAL => emptyTopic
@@ -177,18 +144,6 @@ object Node2Topic {
     queryTopic
   }
 
-  //  def tpcLateralView(node: ASTNode): ITopic = {
-  //    require(node.getType == HiveParser.TOK_LATERAL_VIEW)
-  //    val res = for (elem <- childrenASTNode(node)) yield {
-  //      elem.getType match {
-  //        case HiveParser.TOK_TABREF => getTabRef(elem)
-  //        case HiveParser.TOK_SELECT => getSelect(elem)
-  //        case _ => throw new RuntimeException(unknownType(elem))
-  //      }
-  //    }
-  //    val str = "LATERAL VIEW " + res.head
-  //    topic(res(1), Array(), str)
-  //  }
   def tpcLateralView(node: ASTNode): ITopic = {
     require(node.getType == HiveParser.TOK_LATERAL_VIEW)
     val res = for (elem <- childrenASTNode(node)) yield {
@@ -239,7 +194,6 @@ object Node2Topic {
         case _ => throw new RuntimeException(unknownType(elem))
       }
     }
-    //暂时先把insert的内容放到 destination里面，后面再移除掉destination中的内容
     val select = res.filter(emptyTextTopic)
     val des = res.filterNot(emptyTextTopic)
     topicMergeContent(des ++ select: _*)
@@ -273,10 +227,4 @@ object Node2Topic {
     rtnTpc
   }
 
-  def save(topic: ITopic, rootText: String, file: String): Unit = {
-    val root = wb.getPrimarySheet.getRootTopic
-    root.setTitleText(rootText)
-    root.add(topic)
-    wb.save(file)
-  }
 }

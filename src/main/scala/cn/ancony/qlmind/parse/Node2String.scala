@@ -6,6 +6,7 @@ import scala.collection.JavaConverters._
 import scala.collection.mutable
 
 object Node2String {
+
   val dot = "."
   val space = " "
   val empty = ""
@@ -592,4 +593,5 @@ object Node2String {
     }
     Array()
   }
+
 }

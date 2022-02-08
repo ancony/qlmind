@@ -1,5 +1,6 @@
 package cn.ancony.qlmind.parse
 
+import cn.ancony.qlmind.util.FileUtils.save
 import org.apache.hadoop.hive.ql.parse.ParseUtils
 import org.scalatest.funsuite.AnyFunSuite
 
@@ -26,12 +27,12 @@ class TestSelect extends AnyFunSuite {
     val node = ParseUtils.parse(hql)
     println(node.dump())
     val topic = Node2Topic.tpcQuery(node)
-    Node2Topic.save(topic, "ct", "ct.xmind")
+    save(topic, "ct", "ct.xmind")
   }
   test("test select2") {
     val node = ParseUtils.parse(hql5)
     println(node.dump())
     val topic = Node2Topic.tpcQuery(node)
-    Node2Topic.save(topic, "ct", "ct.xmind")
+    save(topic, "ct", "ct.xmind")
   }
 }
