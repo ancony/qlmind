@@ -450,6 +450,8 @@ object Node2String {
         case HiveParser.StringLiteral => child.toString
         case HiveParser.KW_AND => getAnd(child)
         case HiveParser.KW_OR => getOr(child)
+        case HiveParser.KW_NOT => getNot(child)
+        case HiveParser.TOK_FUNCTION => getFunction(child)
         case _ if relationship.contains(child.getType) => getRelationshipCompare(child)
         case _ => throw new RuntimeException(unknownType(child))
       }
@@ -528,6 +530,19 @@ object Node2String {
     res.head
   }
 
+  def getLSquare(node: ASTNode): String = {
+    require(node.getType == HiveParser.LSQUARE)
+    val res = for (elem <- node.getChildren.asScala; child = elem.asInstanceOf[ASTNode]) yield
+      child.getType match {
+        case HiveParser.TOK_FUNCTION => getFunction(child)
+        case HiveParser.Number => child.toString
+        case _ => throw new RuntimeException(unknownType(child))
+      }
+
+    val other = if (res.length == 2) res(1).mkString("[", ",", "]") else ""
+    res.head + other
+  }
+
   def getSelExpr(node: ASTNode): String = {
     require(node.getType == HiveParser.TOK_SELEXPR)
     val res = for (elem <- node.getChildren.asScala; child = elem.asInstanceOf[ASTNode]) yield
@@ -545,6 +560,7 @@ object Node2String {
         case HiveParser.TOK_NULL => "NULL"
         case HiveParser.TOK_TABALIAS => "_alias_" + getTabAlias(child)
         case HiveParser.StringLiteral => child.toString
+        case HiveParser.LSQUARE => getLSquare(child)
         case _ => throw new RuntimeException(unknownType(child))
       }
 

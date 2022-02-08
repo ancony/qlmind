@@ -60,6 +60,11 @@ object Node2Topic {
         case HiveParser.TOK_FILEFORMAT_GENERIC => emptyTopic
         case HiveParser.TOK_FILEFORMAT_GENERIC => emptyTopic
         case HiveParser.TOK_TABLESKEWED => emptyTopic
+        case HiveParser.KW_EXTERNAL => emptyTopic
+        case HiveParser.TOK_IFNOTEXISTS => emptyTopic
+        case HiveParser.TOK_TABLELOCATION => emptyTopic
+        case HiveParser.TOK_TABLEPROPERTIES => emptyTopic
+        case HiveParser.TOK_TABLEPROPERTY => emptyTopic
         case HiveParser.TOK_QUERY => tpcQuery(child)
         case _ => throw new RuntimeException(unknownType(child))
       }
@@ -172,17 +177,33 @@ object Node2Topic {
     queryTopic
   }
 
+  //  def tpcLateralView(node: ASTNode): ITopic = {
+  //    require(node.getType == HiveParser.TOK_LATERAL_VIEW)
+  //    val res = for (elem <- childrenASTNode(node)) yield {
+  //      elem.getType match {
+  //        case HiveParser.TOK_TABREF => getTabRef(elem)
+  //        case HiveParser.TOK_SELECT => getSelect(elem)
+  //        case _ => throw new RuntimeException(unknownType(elem))
+  //      }
+  //    }
+  //    val str = "LATERAL VIEW " + res.head
+  //    topic(res(1), Array(), str)
+  //  }
   def tpcLateralView(node: ASTNode): ITopic = {
     require(node.getType == HiveParser.TOK_LATERAL_VIEW)
     val res = for (elem <- childrenASTNode(node)) yield {
       elem.getType match {
-        case HiveParser.TOK_TABREF => getTabRef(elem)
-        case HiveParser.TOK_SELECT => getSelect(elem)
+        case HiveParser.TOK_TABREF => topic(getTabRef(elem))
+        case HiveParser.TOK_SELECT => topic("_select", Array(), getSelect(elem))
+        case HiveParser.TOK_SUBQUERY => tpcSubQuery(elem)
         case _ => throw new RuntimeException(unknownType(elem))
       }
     }
-    val str = "LATERAL VIEW " + res.head
-    topic(res(1), Array(), str)
+    val select = res.filter(_.getTitleText.equals("_select"))
+    val rtn = res.filterNot(_.getTitleText.equals("_select")).head
+    if (select.nonEmpty)
+      notesContent(rtn).setTextContent("LATERAL VIEW " + notesContent(select.head).getTextContent)
+    rtn
   }
 
   def tpcFrom(node: ASTNode): ITopic = {
@@ -238,7 +259,7 @@ object Node2Topic {
       .filter { case (id, _) => id.equals(identifier) }
       .map { case (_, tpc) => tpc }
       .head
-    val from = filterTopicHead("_from")
+    val from = if (res.length > 1) filterTopicHead("_from") else topic("_from")
     val insert = filterTopicHead("_insert")
     //要返回的topic
     val rtnTpc = if (insert.getAllChildren.size() == 0) topic(insert.getTitleText) else insert
