@@ -15,35 +15,37 @@ object Node2String {
   val unknownType: ASTNode => String = (node: ASTNode) =>
     s"Unknown type: ${node.getType}, name: ${node.toString} in node ${node.getParent.asInstanceOf[ASTNode].dump()}"
 
-  def getTablePartition(node: ASTNode): String = {
-    require(node.getType == HiveParser.TOK_TABLE_PARTITION)
-    val res = for (elem <- node.getChildren.asScala; child = elem.asInstanceOf[ASTNode]) yield {
-      child.getType match {
-        case HiveParser.TOK_TABNAME => getTabName(child)
-        case HiveParser.TOK_PARTSPEC => "" //
-        case _ => throw new RuntimeException(unknownType(child))
-      }
-    }
-    res.filter(_.nonEmpty).head
-  }
+  type ASTNodeString = ASTNode => String
+
+  def childrenLoopString(node: ASTNode, f: ASTNodeString): mutable.Buffer[String] =
+    for (elem <- node.getChildren.asScala; child = elem.asInstanceOf[ASTNode]) yield f(child)
+
+  def childrenLoopStr(node: ASTNode): mutable.Buffer[String] =
+    for (elem <- node.getChildren.asScala) yield elem.toString
 
   def getTabName(node: ASTNode): String = {
     require(node.getType == HiveParser.TOK_TABNAME)
-    val res = for (elem <- node.getChildren.asScala)
-      yield elem.toString
-    res.toArray mkString dot
+    childrenLoopStr(node).mkString(dot)
+  }
+
+  def getTablePartition(node: ASTNode): String = {
+    require(node.getType == HiveParser.TOK_TABLE_PARTITION)
+    val res = childrenLoopString(node, n => n.getType match {
+      case HiveParser.TOK_TABNAME => getTabName(n)
+      case HiveParser.TOK_PARTSPEC => "" //
+      case _ => throw new RuntimeException(unknownType(n))
+    })
+    res.filter(_.nonEmpty).head
   }
 
   def getTabRef(node: ASTNode): String = {
     require(node.getType == HiveParser.TOK_TABREF)
-    var res = for (elem <- node.getChildren.asScala; child = elem.asInstanceOf[ASTNode]) yield {
-      child.getType match {
-        case HiveParser.TOK_TABNAME => getTabName(child)
-        case HiveParser.TOK_TABLEBUCKETSAMPLE => ""
-        case HiveParser.Identifier => child.toString
-        case _ => throw new RuntimeException(unknownType(child))
-      }
-    }
+    var res = childrenLoopString(node, n => n.getType match {
+      case HiveParser.TOK_TABNAME => getTabName(n)
+      case HiveParser.TOK_TABLEBUCKETSAMPLE => ""
+      case HiveParser.Identifier => n.toString
+      case _ => throw new RuntimeException(unknownType(n))
+    })
     res = res.filter(_.nonEmpty)
     val ref = if (res.length == 2) s"(${res(1)})" else empty
     res.head + ref
@@ -56,122 +58,109 @@ object Node2String {
 
   def getSelect(node: ASTNode): String = {
     require(node.getType == HiveParser.TOK_SELECT)
-    val res = for (elem <- node.getChildren.asScala; child = elem.asInstanceOf[ASTNode]) yield
-      child.getType match {
-        case HiveParser.TOK_SELEXPR => getSelExpr(child)
-        case HiveParser.QUERY_HINT => "" // /*+ STREAMTABLE(a) */
-        case _ => throw new RuntimeException(unknownType(child))
-      }
+    val res = childrenLoopString(node, n => n.getType match {
+      case HiveParser.TOK_SELEXPR => getSelExpr(n)
+      case HiveParser.QUERY_HINT => "" // /*+ STREAMTABLE(a) */
+      case _ => throw new RuntimeException(unknownType(n))
+    })
     res.filter(_.nonEmpty).mkString(lf)
   }
 
   def getSelectDi(node: ASTNode): String = {
     require(node.getType == HiveParser.TOK_SELECTDI)
-    val res = for (elem <- node.getChildren.asScala; child = elem.asInstanceOf[ASTNode]) yield
-      child.getType match {
-        case HiveParser.TOK_SELEXPR => getSelExpr(child)
-        case _ => throw new RuntimeException(unknownType(child))
-      }
+    val res = childrenLoopString(node, n => n.getType match {
+      case HiveParser.TOK_SELEXPR => getSelExpr(n)
+      case _ => throw new RuntimeException(unknownType(n))
+    })
     s"DISTINCT $lf" + res.filter(_.nonEmpty).mkString(lf)
   }
 
   def getNot(node: ASTNode): String = {
     require(node.getType == HiveParser.KW_NOT)
-    val res = for (elem <- node.getChildren.asScala; child = elem.asInstanceOf[ASTNode]) yield
-      child.getType match {
-        case HiveParser.TOK_FUNCTION => getFunction(child)
-        case HiveParser.KW_LIKE => getLike(child)
-        case HiveParser.DOT => getDot(child)
-        case _ => throw new RuntimeException(unknownType(child))
-      }
+    val res = childrenLoopString(node, child => child.getType match {
+      case HiveParser.TOK_FUNCTION => getFunction(child)
+      case HiveParser.DOT => getDot(child)
+      case _ if likeRegexp.contains(child.getType) => getLikeRegexp(child)
+      case _ => throw new RuntimeException(unknownType(child))
+    })
     val funcStr = res.head.split("\\s+")
     val hd = funcStr.head
     if (funcStr.length == 1) s"NOT $hd$lf"
     else s"$hd NOT ${funcStr.tail.mkString(" ")}$lf"
   }
 
-  def getLike(node: ASTNode): String = {
-    require(node.getType == HiveParser.KW_LIKE ||
-      node.getType == HiveParser.KW_RLIKE ||
-      node.getType == HiveParser.KW_REGEXP)
-    val res = for (elem <- node.getChildren.asScala; child = elem.asInstanceOf[ASTNode]) yield
-      child.getType match {
-        case HiveParser.DOT => getDot(child)
-        case HiveParser.StringLiteral => child.toString
-        case HiveParser.TOK_TABLE_OR_COL => getTableOrCol(child)
-        case _ => throw new RuntimeException(unknownType(child))
-      }
-    s"${res.head} ${node.toString.toUpperCase} ${res(1)}}"
+  def getLikeRegexp(node: ASTNode): String = {
+    require(likeRegexp.contains(node.getType))
+    val res = childrenLoopString(node, child => child.getType match {
+      case HiveParser.DOT => getDot(child)
+      case HiveParser.StringLiteral => child.toString
+      case HiveParser.TOK_TABLE_OR_COL => getTableOrCol(child)
+      case _ => throw new RuntimeException(unknownType(child))
+    })
+    res.mkString(s" ${node.toString.toUpperCase} ")
   }
 
   def getOr(node: ASTNode): String = {
     require(node.getType == HiveParser.KW_OR)
-    val res = for (elem <- node.getChildren.asScala; child = elem.asInstanceOf[ASTNode]) yield {
-      child.getType match {
-        case HiveParser.StringLiteral => child.toString
-        case HiveParser.KW_AND => getAnd(child)
-        case HiveParser.KW_OR => getOr(child)
-        case HiveParser.TOK_FUNCTION => getFunction(child)
-        case _ if relationship.contains(child.getType) => getRelationshipCompare(child)
-        case _ => throw new RuntimeException(unknownType(child))
-      }
-    }
+    val res = childrenLoopString(node, child => child.getType match {
+      case HiveParser.StringLiteral => child.toString
+      case HiveParser.KW_AND => getAnd(child)
+      case HiveParser.KW_OR => getOr(child)
+      case _ if likeRegexp.contains(child.getType) => getLikeRegexp(child)
+      case HiveParser.TOK_FUNCTION => getFunction(child)
+      case _ if relationship.contains(child.getType) => getRelationshipCompare(child)
+      case _ => throw new RuntimeException(unknownType(child))
+    })
     val rtn = res.mkString(s" OR ")
     "(" + rtn + ")"
   }
 
   def getWhere(node: ASTNode): String = {
     require(node.getType == HiveParser.TOK_WHERE)
-    val res = for (elem <- node.getChildren.asScala; child = elem.asInstanceOf[ASTNode]) yield
-      child.getType match {
-        case _ if relationship.contains(child.getType) => getRelationshipCompare(child)
-        case HiveParser.KW_AND => getAnd(child)
-        case HiveParser.KW_OR => getOr(child)
-        case HiveParser.TOK_FUNCTION => getFunction(child)
-        case HiveParser.KW_NOT => getNot(child)
-        case HiveParser.KW_LIKE => getLike(child)
-        case HiveParser.KW_RLIKE => getLike(child)
-        case HiveParser.KW_REGEXP => getLike(child)
-        case _ => throw new RuntimeException(unknownType(child))
-      }
+    val res = childrenLoopString(node, child => child.getType match {
+      case _ if relationship.contains(child.getType) => getRelationshipCompare(child)
+      case HiveParser.KW_AND => getAnd(child)
+      case HiveParser.KW_OR => getOr(child)
+      case HiveParser.TOK_FUNCTION => getFunction(child)
+      case HiveParser.KW_NOT => getNot(child)
+      case _ if likeRegexp.contains(child.getType) => getLikeRegexp(child)
+      case _ => throw new RuntimeException(unknownType(child))
+    })
     "WHERE" + space + res.mkString(lf)
   }
 
   def getDot(node: ASTNode): String = {
     require(node.getType == HiveParser.DOT)
-    val res = for (elem <- node.getChildren.asScala; child = elem.asInstanceOf[ASTNode]) yield
-      child.getType match {
-        case HiveParser.TOK_TABLE_OR_COL => getTableOrCol(child)
-        case HiveParser.Identifier => child.toString
-        case _ => throw new RuntimeException(unknownType(child))
-      }
+    val res = childrenLoopString(node, child => child.getType match {
+      case HiveParser.TOK_TABLE_OR_COL => getTableOrCol(child)
+      case HiveParser.Identifier => child.toString
+      case _ => throw new RuntimeException(unknownType(child))
+    })
     res.mkString(dot)
   }
 
   def getWindowRange(node: ASTNode): String = {
     require(node.getType == HiveParser.TOK_WINDOWRANGE)
-    val res = for (elem <- node.getChildren.asScala; child = elem.asInstanceOf[ASTNode]) yield
-      child.getType match {
-        case HiveParser.KW_PRECEDING =>
-          getPreCeding(child) + " " + child.toString
-        case HiveParser.KW_CURRENT =>
-          s"${child.toString} ROW"
-        case HiveParser.KW_FOLLOWING =>
-          child.getChildren.get(0).toString + " " + child.toString
-        case _ => throw new RuntimeException(unknownType(child))
-      }
+    val res = childrenLoopString(node, child => child.getType match {
+      case HiveParser.KW_PRECEDING =>
+        getPreCeding(child) + " " + child.toString
+      case HiveParser.KW_CURRENT =>
+        s"${child.toString} ROW"
+      case HiveParser.KW_FOLLOWING =>
+        child.getChildren.get(0).toString + " " + child.toString
+      case _ => throw new RuntimeException(unknownType(child))
+    })
     val between = if (res.length == 2) "BETWEEN " else ""
     res.mkString(s"ROWS $between", " AND ", "")
   }
 
   def getPreCeding(node: ASTNode): String = {
     require(node.getType == HiveParser.KW_PRECEDING)
-    val res = for (elem <- node.getChildren.asScala; child = elem.asInstanceOf[ASTNode]) yield
-      child.getType match {
-        case HiveParser.KW_UNBOUNDED => "UNBOUNDED"
-        case HiveParser.Number => child.toString
-        case _ => throw new RuntimeException(unknownType(child))
-      }
+    val res = childrenLoopString(node, child => child.getType match {
+      case HiveParser.KW_UNBOUNDED => "UNBOUNDED"
+      case HiveParser.Number => child.toString
+      case _ => throw new RuntimeException(unknownType(child))
+    })
     res.mkString(dot)
   }
 
@@ -188,6 +177,7 @@ object Node2String {
     "TOK_BIGINT" -> "BIGINT",
     "TOK_STRING" -> "STRING"
   )
+
   val cast: (String, String) => String = (typ: String, field: String) => s"CAST($field AS ${rmAddCast(typ)})"
   val isStr: (String, String) => String = (typ: String, field: String) => s"$field ${rmAddIs(typ)}"
 
@@ -206,44 +196,30 @@ object Node2String {
     res.mkString(" ")
   }
 
-  def getGreaterThanOrEqualTo(node: ASTNode): String = {
-    require(node.getType == HiveParser.GREATERTHANOREQUALTO)
-    val res = for (elem <- node.getChildren.asScala; child = elem.asInstanceOf[ASTNode]) yield
-      child.getType match {
-        case HiveParser.TOK_TABLE_OR_COL => getTableOrCol(child)
-        case HiveParser.TOK_FUNCTION => getFunction(child)
-        case HiveParser.Number => child.toString
-        case _ => throw new RuntimeException(unknownType(child))
-      }
-    res.mkString(">=")
-  }
-
   def getFunction(node: ASTNode): String = {
     require(node.getType == HiveParser.TOK_FUNCTION)
     var win = false
-    val res = for (elem <- node.getChildren.asScala; child = elem.asInstanceOf[ASTNode]) yield {
-      child.getType match {
-        case HiveParser.Identifier => child.toString.toUpperCase
-        case HiveParser.TOK_TABLE_OR_COL => getTableOrCol(child)
-        case HiveParser.DOT => getDot(child)
-        case HiveParser.TOK_WINDOWSPEC =>
-          win = true
-          getWindowSpec(child)
-        case HiveParser.KW_FALSE => empty
-        case HiveParser.Number => child.toString
-        case HiveParser.StringLiteral => child.toString
-        case _ if rmAddCast.contains(child.toString) => child.toString
-        case HiveParser.KW_WHEN => child.toString
-        case HiveParser.KW_CASE => child.toString
-        case _ if relationship.contains(child.getType) => getRelationshipCompare(child)
-        case HiveParser.TOK_NULL => "NULL"
-        case HiveParser.TOK_FUNCTION => getFunction(child)
-        case HiveParser.KW_AND => getAnd(child)
-        case HiveParser.KW_OR => getOr(child)
-        case HiveParser.MINUS => getArithmetics(child)
-        case _ => throw new RuntimeException(unknownType(child))
-      }
-    }
+    val res = childrenLoopString(node, child => child.getType match {
+      case HiveParser.Identifier => child.toString.toUpperCase
+      case HiveParser.TOK_TABLE_OR_COL => getTableOrCol(child)
+      case HiveParser.DOT => getDot(child)
+      case HiveParser.TOK_WINDOWSPEC =>
+        win = true
+        getWindowSpec(child)
+      case HiveParser.KW_FALSE => empty
+      case HiveParser.Number => child.toString
+      case HiveParser.StringLiteral => child.toString
+      case _ if rmAddCast.contains(child.toString) => child.toString
+      case HiveParser.KW_WHEN => child.toString
+      case HiveParser.KW_CASE => child.toString
+      case _ if relationship.contains(child.getType) => getRelationshipCompare(child)
+      case HiveParser.TOK_NULL => "NULL"
+      case HiveParser.TOK_FUNCTION => getFunction(child)
+      case HiveParser.KW_AND => getAnd(child)
+      case HiveParser.KW_OR => getOr(child)
+      case HiveParser.MINUS => getArithmetics(child)
+      case _ => throw new RuntimeException(unknownType(child))
+    })
 
     val windowString = if (win) "OVER " + res.last else ""
     val identify = if (win) res.filter(_.nonEmpty).take(res.length - 1) else res.filter(_.nonEmpty)
@@ -262,38 +238,35 @@ object Node2String {
   }
 
   def getNulls(node: ASTNode): String = {
-    require(Array(HiveParser.TOK_NULLS_LAST, HiveParser.TOK_NULLS_FIRST).contains(node.getType))
-    val res = for (elem <- node.getChildren.asScala; child = elem.asInstanceOf[ASTNode]) yield
-      child.getType match {
-        case HiveParser.TOK_TABLE_OR_COL => getTableOrCol(child)
-        case HiveParser.DOT => getDot(child)
-        case _ => throw new RuntimeException(unknownType(child))
-      }
+    require(nullsFirstLast.contains(node.getType))
+    val res = childrenLoopString(node, child => child.getType match {
+      case HiveParser.TOK_TABLE_OR_COL => getTableOrCol(child)
+      case HiveParser.DOT => getDot(child)
+      case _ => throw new RuntimeException(unknownType(child))
+    })
     res.head
   }
 
   //order 只能为 DESC 或者 ASC
   def getTabSortColName(node: ASTNode, order: String): String = {
-    require(Array(HiveParser.TOK_TABSORTCOLNAMEDESC,
-      HiveParser.TOK_TABSORTCOLNAMEASC).contains(node.getType))
-    val res = for (elem <- node.getChildren.asScala; child = elem.asInstanceOf[ASTNode]) yield
-      child.getType match {
-        case HiveParser.TOK_NULLS_LAST | HiveParser.TOK_NULLS_FIRST => getNulls(child)
-        case _ => throw new RuntimeException(unknownType(child))
-      }
+    require(ascDesc.keys.toArray.contains(node.getType))
+    val res = childrenLoopString(node, child => child.getType match {
+      case _ if nullsFirstLast.contains(child.getType) => getNulls(child)
+      case _ => throw new RuntimeException(unknownType(child))
+    })
     res.head + " " + order
   }
 
   //typ只能是ORDER或者SORT
   def getOrderByOrSortBy(node: ASTNode, typ: String): String = {
     require(orderByOrSortBy.contains(node.getType))
-    val res = for (elem <- node.getChildren.asScala; child = elem.asInstanceOf[ASTNode]) yield {
-      child.getType match {
-        case HiveParser.TOK_TABSORTCOLNAMEDESC => getTabSortColName(child, "DESC")
-        case HiveParser.TOK_TABSORTCOLNAMEASC => getTabSortColName(child, "ASC")
+    val res = childrenLoopString(node, child => {
+      val childTyp = child.getType
+      childTyp match {
+        case _ if ascDesc.keys.toArray.contains(childTyp) => getTabSortColName(child, ascDesc(childTyp))
         case _ => throw new RuntimeException(unknownType(child))
       }
-    }
+    })
     typ + " BY " + res.mkString(", ")
   }
 
