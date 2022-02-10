@@ -11,23 +11,51 @@ object TopicUtils {
   val wb: IWorkbook = Core.getWorkbookBuilder.createWorkbook()
 
   val childrenASTNode: ASTNode => mutable.Buffer[ASTNode] =
-    (node: ASTNode) => node.getChildren.asScala.map(_.asInstanceOf[ASTNode])
-  val notesContent: ITopic => IPlainNotesContent = (topic: ITopic) =>
-    topic.getNotes.getContent(INotes.PLAIN).asInstanceOf[IPlainNotesContent]
-  val emptyTextTopic: ITopic => Boolean = (tpc: ITopic) =>
-    tpc == null || tpc.getTitleText.isEmpty
-  val emptyTopic: ITopic = topic("")
-  val emptyContentTopic: ITopic => Boolean = (tpc: ITopic) =>
-    tpc == null || notesContent(tpc).getTextContent.isEmpty
-  val leaves: ITopic => Array[ITopic] = (tpc: ITopic) => getSubTopicRecursion(tpc, _ => true)
-  val rmAdditionalInfo: String => String = (text: String) => {
+    node => node.getChildren.asScala.map(_.asInstanceOf[ASTNode])
+
+  val rmAdditionalInfo: String => String = text => {
     val idx = text.indexOf('(')
     if (idx == -1) text else text.slice(0, idx)
   }
-  val text: ITopic => String = (tpc: ITopic) => tpc.getTitleText
-  val rmAlias: ITopic => String = (tpc: ITopic) => rmAdditionalInfo(text(tpc))
-  val hasChild: ITopic => Boolean = (tpc: ITopic) => tpc.getAllChildren.size() > 0
-  val hasLabel: ITopic => Boolean = (tpc: ITopic) => tpc.getLabels.size() > 0
+
+  val notesContent: ITopic => IPlainNotesContent = tpc =>
+    tpc.getNotes.getContent(INotes.PLAIN).asInstanceOf[IPlainNotesContent]
+  val getText: IPlainNotesContent => String = note => note.getTextContent
+  val setText: (IPlainNotesContent, String) => Unit = (note, content) => note.setTextContent(content)
+
+  def complement[A](pre: A => Boolean): A => Boolean = a => !pre(a)
+
+  def any[A](predicates: (A => Boolean)*): A => Boolean =
+    a => predicates.exists(p => p(a))
+
+  def none[A](predicates: (A => Boolean)*): A => Boolean =
+    complement(any(predicates: _*))
+
+  def every[A](predicates: (A => Boolean)*): A => Boolean =
+    none(predicates.view.map(complement(_)): _*)
+
+  type TopicString = ITopic => String
+  type TopicFilter = ITopic => Boolean
+
+  val text: TopicString = tpc => tpc.getTitleText
+  val rmAlias: TopicString = text.andThen(rmAdditionalInfo)
+  val getContent: TopicString = notesContent.andThen(getText)
+  val setContent: (ITopic, String) => Unit = (tpc, content) => setText(notesContent(tpc), content)
+
+  val noTitleText: TopicFilter = tpc => text(tpc).isEmpty
+  val noContent: TopicFilter = tpc => getContent(tpc).isEmpty
+  val noChild: TopicFilter = tpc => tpc.getAllChildren.size() == 0
+  val noLabel: TopicFilter = tpc => tpc.getLabels.size() == 0
+  val hasTitleText: TopicFilter = complement(noTitleText)
+  val hasContent: TopicFilter = complement(noContent)
+  val hasChild: TopicFilter = complement(noChild)
+  val hasLabel: TopicFilter = complement(noLabel)
+
+  val emptyTopic: ITopic = topic("")
+  val topicOnlyContent: String => ITopic =
+    (content: String) => topic("", Array(), content)
+
+  val leaves: ITopic => mutable.Buffer[ITopic] = tpc => getSubTopicRecursion(tpc, _ => true)
 
   def topic(text: String, labels: Array[String] = Array(), content: String = ""): ITopic = {
     val tpc = wb.createTopic()
@@ -39,28 +67,25 @@ object TopicUtils {
     tpc
   }
 
-  val topicOnlyContent: String => ITopic =
-    (content: String) => topic("", Array(), content)
-
   //合并topic的内容，忽略其他
   def topicMergeContent(topics: ITopic*): ITopic = {
-    val content = topics.map(notesContent).map(_.getTextContent).mkString("\n")
-    notesContent(topics.head).setTextContent(content)
+    val content = topics.map(getContent).mkString("\n")
+    setContent(topics.head, content)
     topics.head
   }
 
   /**
    * 递归获取topic中符合条件的子topic
    *
-   * @param topic 要查找的topic
-   * @param func  查找条件
+   * @param tpc  要查找的topic
+   * @param func 查找条件
    * @return 返回条件为true的子topic数组
    */
-  def getSubTopicRecursion(topic: ITopic, func: ITopic => Boolean): Array[ITopic] = {
-    if (topic == null) return Array()
-    if (topic.getAllChildren.size() == 0 && func(topic)) Array(topic)
-    else (for (child <- topic.getAllChildren.asScala)
-      yield getSubTopicRecursion(child, func)).flatten.toArray
+  def getSubTopicRecursion(tpc: ITopic, func: TopicFilter): mutable.Buffer[ITopic] = {
+    if (tpc == null) return mutable.Buffer()
+    if (every(noChild, func)(tpc)) mutable.Buffer(tpc)
+    else (for (child <- tpc.getAllChildren.asScala)
+      yield getSubTopicRecursion(child, func)).flatten
   }
 
   def addLink(from: ITopic, to: ITopic): Unit = from.setHyperlink("xmind:#" + to.getId)

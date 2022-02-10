@@ -5,6 +5,7 @@ import cn.ancony.qlmind.util.TopicUtils.wb
 import org.apache.hadoop.hive.ql.parse.{HiveParser, ParseUtils}
 import org.xmind.core.ITopic
 
+import scala.collection.mutable
 import scala.io.Source
 
 object FileUtils {
@@ -28,7 +29,7 @@ object FileUtils {
     if (idx == -1) name.slice(0, stop) else name.slice(idx + 1, stop)
   }
 
-  def getAllTopicsInFile(fileName: String): Map[String, Array[ITopic]] = {
+  def getAllTopicsInFile(fileName: String): Map[String, mutable.Buffer[ITopic]] = {
     val text = readFromFile(fileName)
     val res = for (hql <- text.split(";").toList) yield {
       val node = ParseUtils.parse(hql)
@@ -38,7 +39,7 @@ object FileUtils {
         case HiveParser.TOK_DROPTABLE => ("_drop", tpcDropTable(node))
       }
     }
-    val rtn = res.groupBy(_._1).map(i => (i._1, i._2.map(_._2).toArray))
+    val rtn = res.groupBy(_._1).map(i => (i._1, i._2.map(_._2).toBuffer))
     rtn
   }
 

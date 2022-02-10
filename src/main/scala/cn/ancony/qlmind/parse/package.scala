@@ -1,6 +1,6 @@
 package cn.ancony.qlmind
 
-import cn.ancony.qlmind.parse.Node2String.rmAddCast
+//import cn.ancony.qlmind.parse.Node2String.rmAddCast
 import org.apache.hadoop.hive.ql.parse.HiveParser
 
 package object parse {
@@ -59,15 +59,6 @@ package object parse {
   val nullsFirstLast: Array[Int] = Array(
     HiveParser.TOK_NULLS_FIRST,
     HiveParser.TOK_NULLS_LAST
-  )
-
-  val cast: (String, String) => String = (typ, field) => s"CAST($field AS ${rmAddCast(typ)})"
-
-  val castMap: Map[Int, String] = Map(
-    HiveParser.TOK_INT -> "INT",
-    HiveParser.TOK_DOUBLE -> "DOUBLE",
-    HiveParser.TOK_BIGINT -> "BIGINT",
-    HiveParser.TOK_STRING -> "STRING"
   )
 
 }

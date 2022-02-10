@@ -20,6 +20,6 @@ order by col1 desc;
 
 insert overwrite table ads.t_t1
 select col1, col2, col3
-from temp.t_temp1;
+from temp.t_temp1 t;
 
 drop table temp.t_temp1;

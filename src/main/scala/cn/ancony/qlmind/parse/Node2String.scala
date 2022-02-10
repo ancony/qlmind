@@ -164,22 +164,23 @@ object Node2String {
     res.mkString(dot)
   }
 
-  val rmAddIs: Map[String, String] = Map(
+  val isMap: Map[String, String] = Map(
     "ISNULL" -> "IS NULL",
     "ISNOTNULL" -> "IS NOT NULL",
     "ISTRUE" -> "IS TRUE",
     "ISNOTTRUE" -> "IS NOT TRUE",
     "ISFALSE" -> "IS FALSE",
     "ISNOTFALSE" -> "IS NOT FALSE")
-  val rmAddCast: Map[String, String] = Map(
+
+  val castMap: Map[String, String] = Map(
     "TOK_INT" -> "INT",
     "TOK_DOUBLE" -> "DOUBLE",
     "TOK_BIGINT" -> "BIGINT",
     "TOK_STRING" -> "STRING"
   )
 
-  val cast: (String, String) => String = (typ: String, field: String) => s"CAST($field AS ${rmAddCast(typ)})"
-  val isStr: (String, String) => String = (typ: String, field: String) => s"$field ${rmAddIs(typ)}"
+  val cast: (String, String) => String = (col: String, typ: String) => s"CAST($col AS ${castMap(typ)})"
+  val is: (String, String) => String = (col: String, typ: String) => s"$col ${isMap(typ)}"
 
   val odd: Int => Boolean = (n: Int) => n % 2 == 1
   val even: Int => Boolean = (n: Int) => !odd(n)
@@ -209,15 +210,17 @@ object Node2String {
       case HiveParser.KW_FALSE => empty
       case HiveParser.Number => child.toString
       case HiveParser.StringLiteral => child.toString
-      case _ if rmAddCast.contains(child.toString) => child.toString
-      case HiveParser.KW_WHEN => child.toString
-      case HiveParser.KW_CASE => child.toString
+      case _ if castMap.contains(child.toString) => child.toString
+      case HiveParser.KW_WHEN => child.toString.toUpperCase
+      case HiveParser.KW_CASE => child.toString.toUpperCase
       case _ if relationship.contains(child.getType) => getRelationshipCompare(child)
       case HiveParser.TOK_NULL => "NULL"
       case HiveParser.TOK_FUNCTION => getFunction(child)
       case HiveParser.KW_AND => getAnd(child)
       case HiveParser.KW_OR => getOr(child)
-      case HiveParser.MINUS => getArithmetics(child)
+      case HiveParser.KW_TRUE => "TRUE"
+      case HiveParser.KW_FALSE => "FALSE"
+      case _ if arithmetic.contains(child.getType) => getArithmetics(child)
       case _ => throw new RuntimeException(unknownType(child))
     })
 
@@ -228,9 +231,9 @@ object Node2String {
     val identifyString = hd match {
       case "BETWEEN" => identify(1) + " BETWEEN " + identify.slice(2, identify.length).mkString(" AND ")
       case "IN" => identify(1) + " IN (" + identify.slice(2, identify.length).mkString(", ") + ")"
-      case _ if hd.startsWith("IS") => isStr(hd, identify(1))
+      case _ if hd.startsWith("IS") => is(identify(1), hd)
       case _ if hd.equals("CASE") || hd.equals("WHEN") => getCaseWhenString(identify, hd)
-      case _ if rmAddCast.keys.exists(hd.equals) => cast(hd, identify(1))
+      case _ if castMap.keys.exists(hd.equals) => cast(identify(1), hd)
       case _ => hd + "(" + identify.tail.mkString(", ") + ")"
     }
     val tail = if (win) " " + windowString else ""
@@ -477,6 +480,7 @@ object Node2String {
         case HiveParser.Number => child.toString
         case HiveParser.TOK_FUNCTION => getFunction(child)
         case HiveParser.DOT => getDot(child)
+        case _ if arithmetic.contains(child.getType) => getArithmetics(child)
         case _ => throw new RuntimeException(unknownType(child))
       }
     val opt = node.toString.toUpperCase

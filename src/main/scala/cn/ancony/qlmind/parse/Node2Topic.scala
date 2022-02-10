@@ -1,7 +1,7 @@
 package cn.ancony.qlmind.parse
 
 import cn.ancony.qlmind.parse.Node2String._
-import cn.ancony.qlmind.util.TopicUtils.{childrenASTNode, emptyContentTopic, emptyTextTopic, emptyTopic, notesContent, topic, topicMergeContent, topicOnlyContent}
+import cn.ancony.qlmind.util.TopicUtils._
 import org.apache.hadoop.hive.ql.parse.{ASTNode, HiveParser}
 import org.xmind.core._
 
@@ -14,32 +14,32 @@ object Node2Topic {
     val res = for (elem <- node.getChildren.asScala; child = elem.asInstanceOf[ASTNode]) yield {
       child.getType match {
         case HiveParser.TOK_TABNAME => tpcTabName(child)
-        case HiveParser.KW_TEMPORARY => emptyTopic
-        case HiveParser.TOK_LIKETABLE => emptyTopic
-        case HiveParser.TOK_TABCOLLIST => emptyTopic
+        case HiveParser.TOK_QUERY => tpcQuery(child)
         case HiveParser.TOK_TABLECOMMENT =>
           val cmt = child.getChildren.get(0).toString
           val comment = cmt.slice(1, cmt.length - 1) //去除引号
           topic("_label", Array(comment), "")
-        case HiveParser.TOK_TABLEPARTCOLS => emptyTopic
-        case HiveParser.TOK_ALTERTABLE_BUCKETS => emptyTopic
-        case HiveParser.TOK_TABLEROWFORMAT => emptyTopic
-        case HiveParser.TOK_TABLESERIALIZER => emptyTopic
-        case HiveParser.TOK_FILEFORMAT_GENERIC => emptyTopic
-        case HiveParser.TOK_TABLESKEWED => emptyTopic
-        case HiveParser.KW_EXTERNAL => emptyTopic
-        case HiveParser.TOK_IFNOTEXISTS => emptyTopic
-        case HiveParser.TOK_TABLELOCATION => emptyTopic
-        case HiveParser.TOK_TABLEPROPERTIES => emptyTopic
-        case HiveParser.TOK_TABLEPROPERTY => emptyTopic
-        case HiveParser.TOK_QUERY => tpcQuery(child)
+        case HiveParser.KW_TEMPORARY |
+             HiveParser.KW_EXTERNAL |
+             HiveParser.TOK_LIKETABLE |
+             HiveParser.TOK_TABCOLLIST |
+             HiveParser.TOK_TABLEPARTCOLS |
+             HiveParser.TOK_ALTERTABLE_BUCKETS |
+             HiveParser.TOK_TABLEROWFORMAT |
+             HiveParser.TOK_TABLESERIALIZER |
+             HiveParser.TOK_FILEFORMAT_GENERIC |
+             HiveParser.TOK_TABLESKEWED |
+             HiveParser.TOK_IFNOTEXISTS |
+             HiveParser.TOK_TABLELOCATION |
+             HiveParser.TOK_TABLEPROPERTIES |
+             HiveParser.TOK_TABLEPROPERTY => emptyTopic
         case _ => throw new RuntimeException(unknownType(child))
       }
     }
     val rtnTopic = res.head
     val labelTpc = res.filter(_.getTitleText.equals("_label"))
     if (labelTpc.nonEmpty) rtnTopic.setLabels(labelTpc.head.getLabels)
-    val subTopic = res.filterNot(emptyTextTopic).filterNot(_.getTitleText.equals("_label")) - rtnTopic
+    val subTopic = res.filter(hasTitleText).filterNot(_.getTitleText.equals("_label")) - rtnTopic
     if (subTopic.nonEmpty) {
       val head = subTopic.head
       val add = if (head.getTitleText.equals("_select")) head.getAllChildren.asScala else List(head)
@@ -53,12 +53,11 @@ object Node2Topic {
     val res = for (elem <- node.getChildren.asScala; child = elem.asInstanceOf[ASTNode]) yield {
       child.getType match {
         case HiveParser.TOK_TABNAME => tpcTabName(child)
-        case HiveParser.TOK_IFEXISTS => emptyTopic
-        case HiveParser.KW_PURGE => emptyTopic //
+        case HiveParser.KW_PURGE | HiveParser.TOK_IFEXISTS => emptyTopic
         case _ => throw new RuntimeException(unknownType(child))
       }
     }
-    res.filterNot(emptyTextTopic).head
+    res.filter(hasTitleText).head
   }
 
   def tpcTruncateTable(node: ASTNode): ITopic = {
@@ -69,7 +68,7 @@ object Node2Topic {
         case _ => throw new RuntimeException(unknownType(child))
       }
     }
-    res.filterNot(emptyTextTopic).head
+    res.filter(hasTitleText).head
   }
 
   def tpcTabName(node: ASTNode): ITopic = topic(getTabName(node))
@@ -84,19 +83,19 @@ object Node2Topic {
     require((joinTypeMap.keys ++ Array(HiveParser.TOK_SUBQUERY)).exists(_ == node.getType))
     val res = for (elem <- childrenASTNode(node)) yield
       elem.getType match {
-        case HiveParser.TOK_TABREF => tpcTabRef(elem)
-        case _ if relationship.contains(elem.getType) => tpcRelationshipCompare(elem)
         case HiveParser.KW_AND => tpcAnd(elem)
-        case _ if joinTypeMap.keys.exists(_ == elem.getType) => tpcJoin(elem)
+        case HiveParser.TOK_TABREF => tpcTabRef(elem)
         case HiveParser.TOK_SUBQUERY => tpcSubQuery(elem)
+        case _ if relationship.contains(elem.getType) => tpcRelationshipCompare(elem)
+        case _ if joinTypeMap.keys.exists(_ == elem.getType) => tpcJoin(elem)
         case _ => throw new RuntimeException(unknownType(elem))
       }
 
-    val contents = res.filter(t => emptyTextTopic(t) && t.getAllChildren.size() == 0)
+    val contents = res.filter(every(noTitleText, noChild))
     //设置contents的连接条件
     contents.map(notesContent).foreach(i => i.setTextContent(joinTypeMap(node.getType) + " ON " + i.getTextContent))
-    val tabRef = res.filter(t => !emptyTextTopic(t) && emptyContentTopic(t)) //当前获得的
-    val subJoin = res.filter(t => emptyTextTopic(t) && t.getAllChildren.size() != 0) //子循环获得的
+    val tabRef = res.filter(every(hasTitleText, noContent)) //当前获得的
+    val subJoin = res.filter(every(noTitleText, hasChild)) //子循环获得的
     //合并结果为连接条件，放到最后一个topic中。
     topicMergeContent(Array(tabRef.last) ++ contents: _*)
     //获得要返回的topic
@@ -129,8 +128,8 @@ object Node2Topic {
     require(node.getType == HiveParser.TOK_SUBQUERY)
     val res = for (elem <- childrenASTNode(node)) yield {
       elem.getType match {
-        case HiveParser.TOK_QUERY => tpcQuery(elem)
         case HiveParser.Identifier => topic(elem.toString)
+        case HiveParser.TOK_QUERY => tpcQuery(elem)
         case HiveParser.TOK_UNIONALL => tpcUnionAll(elem)
         case _ => throw new RuntimeException(unknownType(elem))
       }
@@ -165,10 +164,10 @@ object Node2Topic {
     require(node.getType == HiveParser.TOK_FROM)
     val res = for (elem <- childrenASTNode(node)) yield {
       elem.getType match {
-        case _ if joinTypeMap.keys.exists(_ == elem.getType) => tpcJoin(elem)
-        case HiveParser.TOK_TABREF => tpcTabRef(elem)
-        case HiveParser.TOK_SUBQUERY => tpcSubQuery(elem)
         case HiveParser.TOK_LATERAL_VIEW => tpcLateralView(elem)
+        case HiveParser.TOK_SUBQUERY => tpcSubQuery(elem)
+        case HiveParser.TOK_TABREF => tpcTabRef(elem)
+        case _ if joinTypeMap.keys.exists(_ == elem.getType) => tpcJoin(elem)
         case _ => throw new RuntimeException(unknownType(elem))
       }
     }
@@ -194,10 +193,9 @@ object Node2Topic {
         case _ => throw new RuntimeException(unknownType(elem))
       }
     }
-    val select = res.filter(emptyTextTopic)
-    val des = res.filterNot(emptyTextTopic)
+    val select = res.filter(noTitleText)
+    val des = res.filter(hasTitleText)
     topicMergeContent(des ++ select: _*)
-    des.head
   }
 
   def tpcQuery(node: ASTNode): ITopic = {
@@ -216,10 +214,10 @@ object Node2Topic {
     val from = if (res.length > 1) filterTopicHead("_from") else topic("_from")
     val insert = filterTopicHead("_insert")
     //要返回的topic
-    val rtnTpc = if (insert.getAllChildren.size() == 0) topic(insert.getTitleText) else insert
+    val rtnTpc = if (noChild(insert)) topic(insert.getTitleText) else insert
     val fromU1 = from.getTitleText.equals("_u1")
     //把子topic添加到要返回的topic上
-    if (emptyTextTopic(from) || fromU1) from.getAllChildren.asScala.foreach(rtnTpc.add)
+    if (noTitleText(from) || fromU1) from.getAllChildren.asScala.foreach(rtnTpc.add)
     else rtnTpc.add(from)
     val insertTopic = if (fromU1) topic("") else insert
     //把insert上的信息合并到返回的topic的第一个子topic上

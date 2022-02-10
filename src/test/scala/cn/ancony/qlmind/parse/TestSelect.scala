@@ -35,4 +35,9 @@ class TestSelect extends AnyFunSuite {
     val topic = Node2Topic.tpcQuery(node)
     save(topic, "ct", "ct.xmind")
   }
+  test("test case") {
+    val node = ParseUtils.parse("select col1 between 3 and 7")
+    val tpc = Node2Topic.tpcQuery(node)
+    tpc
+  }
 }
